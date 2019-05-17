@@ -2,7 +2,6 @@
 #include <ArduinoJson.h>
 #include <dht.h>
 
-
 #define dht_apin A1 // Analog Pin sensor is connected to
 #define RX 10
 #define TX 11
@@ -19,22 +18,28 @@ String WIFI_SSID = "molion";            // Your WiFi ssid
 String PASSWORD = "jasiu_luz777";       // Password
 
 String HOST = "192.168.216.221";
-String PATH = "/api/plants/updateSensor";
 String PORT = "8080";
 
+// that defines the equipment and plant id
+int idPlant = 5;
+String idPlantString = "5";
+
+String PUT_PATH = "/api/plants/updateSensor";
+String GET_PATH = "/api/plants/water/" + idPlantString;
 
 int countTrueCommand;
 int countTimeCommand;
 boolean found = false;
 
 
-// that defines the equipment and plant id
-int idPlant = 5;
-
-
 struct PlantData {
   int soilMoistureSensorValue;
   dht DHT;
+};
+
+struct PlantSpecification {
+  int soilMoistureLimit;
+  int wateringPortions;
 };
 
 void setup() {
@@ -60,23 +65,37 @@ void loop() {
   
   struct PlantData plantData;
   plantData = gatherData();
-  
+  // update DB
   String data;
   data = buildJson(plantData);
-  
+
   String putRequest;
   putRequest = preparePutRequest(data);
-
   sendPutRequest(putRequest);
 
-//  boolean clientStatus = getClientStatus();
 
-  if (plantData.soilMoistureSensorValue < 35) {
+  struct PlantSpecification plantSpec;
+  plantSpec = getActualPlantSpecification();
+
+
+  int soilMoistureLimit = plantSpec.soilMoistureLimit;
+  int wateringPortions = plantSpec.wateringPortions;
+  
+  if (plantData.soilMoistureSensorValue < soilMoistureLimit) {
+      Serial.write("Watering due to soilMoistureLimit: ");
+      Serial.write(soilMoistureLimit);
+      Serial.println("");
     water();
-  } 
-//  else if(clientStatus) {
-//    water();
-//  }
+  } else if(wateringPortions > 0) {
+    for (int i=0; i<wateringPortions; i++ ) {
+      Serial.write("WateringPortions: ");
+      char a[1];
+      sprintf(a, "%d", wateringPortions);
+      Serial.write(a);
+      Serial.println("");
+      water();
+    }
+  }
 }
 
 
@@ -101,7 +120,7 @@ String buildJson(struct PlantData plantData) {
 }
 
 String preparePutRequest(String data) {
-  String putRequest = "PUT " + PATH  + " HTTP/1.1\r\n" +
+  String putRequest = "PUT " + PUT_PATH  + " HTTP/1.1\r\n" +
                        "Host: " + HOST + ":" + PORT + "\r\n" +
                        "Content-Type: application/json\r\n" +
                        "Content-Length: " + data.length() + "\r\n\r\n" + 
@@ -109,14 +128,91 @@ String preparePutRequest(String data) {
   return putRequest;
 }
 
+struct PlantSpecification getActualPlantSpecification() {
+  struct PlantSpecification plantSpec;
+
+  String getRequest = "GET " + GET_PATH;
+
+
+//  sendGetRequest(getRequest);
+
+  int wateringPortions=0;
+
+  int colonFlag = 0;
+
+  char buff[60];
+  for (int i=0; i<60; i++) {
+      buff[i] = "0";
+    }
+
+  sendCommand("AT+CIPMUX=1",5,"OK");
+  
+  sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+  
+  sendCommand("AT+CIPSEND=0," + String(getRequest.length()+4),4,">");
+  
+  esp8266.println(getRequest);
+  
+  Serial.println("\n" + getRequest + "\n");
+
+  delay(2500);
+  esp8266.println("");
+  esp8266.listen();
+
+  for (int i=0; i<60; i++) {
+    if (esp8266.available()) {
+      char c = esp8266.read();
+      delay(54);
+      buff[i] = c;
+//      Serial.write(c);
+    }
+  }
+
+  for (int i=0; i<60; i++) {
+    Serial.write(buff[i]);
+    if (buff[i] == ':') {
+      colonFlag++;
+      char a[1];
+      Serial.println("");
+      sprintf(a, "%d", colonFlag);
+      Serial.println(a);
+      Serial.write("jestem tutaj!!");
+    } else if (colonFlag == 2) {
+      Serial.write("a teraz tutaj!!");
+      wateringPortions = int(buff[i]) - 48;
+      Serial.write("Gained watering portions: ");
+      Serial.write(buff[i]);
+      Serial.println("");
+      break;
+    }
+  }
+
+  delay(5000);
+
+  countTrueCommand++;
+  
+//  sendCommand("AT+CIPCLOSE=0",5,"OK");
+
+  plantSpec.soilMoistureLimit = 35;
+  plantSpec.wateringPortions = wateringPortions;
+
+  Serial.println("Final watering portions: ");
+  Serial.println(plantSpec.wateringPortions);
+  
+  return plantSpec;
+}
+
 void sendPutRequest(String putRequest) {
+
   sendCommand("AT+CIPMUX=1",5,"OK");
   
   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
   
   sendCommand("AT+CIPSEND=0," +String(putRequest.length()),4,">");
   
-  esp8266.println(putRequest);Serial.println("\n" + putRequest + "\n");delay(1500);countTrueCommand++;
+  esp8266.println(putRequest);
+  Serial.println("\n" + putRequest + "\n");
+  delay(1500);countTrueCommand++;
   
   sendCommand("AT+CIPCLOSE=0",5,"OK");
 }
@@ -151,12 +247,6 @@ void sendCommand(String command, int maxTime, char readReplay[]) {
   }
   
   found = false;
-}
-
-boolean getClientStatus() {
-  boolean clientStatus;
-
-  return clientStatus;
 }
  
 void water() {
