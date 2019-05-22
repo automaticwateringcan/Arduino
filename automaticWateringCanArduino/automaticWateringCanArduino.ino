@@ -27,7 +27,6 @@ String idPlantString = "5";
 String PUT_PATH = "/api/plants/updateSensor";
 String GET_PATH = "/api/plants/water/" + idPlantString;
 
-int countTrueCommand;
 int countTimeCommand;
 boolean found = false;
 
@@ -51,8 +50,6 @@ void setup() {
   digitalWrite(WATER_PIN, HIGH);
 
   connectToInternet();
-
-  countTrueCommand = 0;
 }
 
 void connectToInternet() {
@@ -78,15 +75,22 @@ void loop() {
   plantSpec = getActualPlantSpecification();
 
 
-  int soilMoistureLimit = plantSpec.soilMoistureLimit;
+  int soilMoistureLimit = 35;
   int wateringPortions = plantSpec.wateringPortions;
+
+
+  if(wateringPortions > 9) {
+    wateringPortions = 9;
+  }
   
   if (plantData.soilMoistureSensorValue < soilMoistureLimit) {
-      Serial.write("Watering due to soilMoistureLimit: ");
-      Serial.write(soilMoistureLimit);
-      Serial.println("");
+//    Serial.write("Watering due to soilMoistureLimit: ");
+    Serial.write(soilMoistureLimit);
+    Serial.println("");
     water();
-  } else if(wateringPortions > 0) {
+  } 
+  
+  if(wateringPortions > 0) {
     for (int i=0; i<wateringPortions; i++ ) {
       Serial.write("WateringPortions: ");
       char a[1];
@@ -172,32 +176,21 @@ struct PlantSpecification getActualPlantSpecification() {
     Serial.write(buff[i]);
     if (buff[i] == ':') {
       colonFlag++;
-      char a[1];
-      Serial.println("");
-      sprintf(a, "%d", colonFlag);
-      Serial.println(a);
-      Serial.write("jestem tutaj!!");
     } else if (colonFlag == 2) {
-      Serial.write("a teraz tutaj!!");
+      Serial.println("");
       wateringPortions = int(buff[i]) - 48;
       Serial.write("Gained watering portions: ");
-      Serial.write(buff[i]);
-      Serial.println("");
+      Serial.println(buff[i]);
       break;
     }
   }
 
   delay(5000);
-
-  countTrueCommand++;
   
 //  sendCommand("AT+CIPCLOSE=0",5,"OK");
 
   plantSpec.soilMoistureLimit = 35;
   plantSpec.wateringPortions = wateringPortions;
-
-  Serial.println("Final watering portions: ");
-  Serial.println(plantSpec.wateringPortions);
   
   return plantSpec;
 }
@@ -205,21 +198,23 @@ struct PlantSpecification getActualPlantSpecification() {
 void sendPutRequest(String putRequest) {
 
   sendCommand("AT+CIPMUX=1",5,"OK");
-  
+
   sendCommand("AT+CIPSTART=0,\"TCP\",\""+ HOST +"\","+ PORT,15,"OK");
+
   
   sendCommand("AT+CIPSEND=0," +String(putRequest.length()),4,">");
-  
+
   esp8266.println(putRequest);
-  Serial.println("\n" + putRequest + "\n");
-  delay(1500);countTrueCommand++;
+  Serial.println("");
+  Serial.println(putRequest);
+  Serial.println("");
+  delay(1500);
   
   sendCommand("AT+CIPCLOSE=0",5,"OK");
 }
 
 void sendCommand(String command, int maxTime, char readReplay[]) {
-  Serial.print(countTrueCommand);
-  Serial.print(". at command => ");
+  Serial.print("command => ");
   Serial.print(command);
   Serial.print(" ");
   
@@ -236,13 +231,9 @@ void sendCommand(String command, int maxTime, char readReplay[]) {
   
   if(found == true) {
     Serial.println("OK");
-    countTrueCommand++;
     countTimeCommand = 0;
-  }
-  
-  if(found == false) {
+  } else if(found == false) {
     Serial.println("Fail");
-    countTrueCommand = 0;
     countTimeCommand = 0;
   }
   
